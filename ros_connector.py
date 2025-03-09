@@ -367,19 +367,19 @@ class F1TenthROSNode(Node):
         action, _ = self.model.predict(self.data, deterministic=True)
 
         self.get_logger().info(f"{action}")
-        # self.send_drive_command_7(
-        #     float(action[1]),
-        #     float(action[0]),
-        #     self.data["scan"],
-        #     self.data["linear_vel_x"],
-        # )
-        self.send_drive_command_8(
+        self.send_drive_command_7(
             float(action[1]),
             float(action[0]),
             self.data["scan"],
             self.data["linear_vel_x"],
-            self.odom_turning,
         )
+        # self.send_drive_command_8(
+        #     float(action[1]),
+        #     float(action[0]),
+        #     self.data["scan"],
+        #     self.data["linear_vel_x"],
+        #     self.odom_turning,
+        # )
 
     def shutdown_gracefully(self, signum, frame):
         # with open("data.csv", "w", newline="") as file:
@@ -447,7 +447,7 @@ def main():
     drive_topic = "/ackermann_cmd"
 
     # Create an instance of the node
-    node = F1TenthROSNode(lidar_scan_topic, odometry_topic, drive_topic, "v0.12")
+    node = F1TenthROSNode(lidar_scan_topic, odometry_topic, drive_topic, "v0.11")
 
     try:
         rclpy.spin(node)  # Keep node running
