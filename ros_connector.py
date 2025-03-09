@@ -263,7 +263,7 @@ class F1TenthROSNode(Node):
         scaled_steering_angle = self._map_value(
             steering_angle, (0.0, +1.0), (-0.4189, 0.4189)
         )
-        scaled_speed = self._map_value(speed, (0.0, +1.0), (0.7, 3.0))
+        scaled_speed = self._map_value(speed, (0.0, +1.0), (0.7, 3.75))
 
         # self.csv_data.append(
         #     (time.time(), scaled_speed, scaled_steering_angle, list(scan), odom_speed)
@@ -336,7 +336,8 @@ class F1TenthROSNode(Node):
         lidar_data = self.get_lidar_data()
         odom_data = self.get_odometry_data()
         if lidar_data and odom_data:
-            self.data["scan"] = np.array(lidar_data.ranges) / 30.0
+            patched_lidar_ranges = self.patch(lidar_data.ranges)
+            self.data["scan"] = patched_lidar_ranges / 30.0
             # self.data["scan"] = np.array(lidar_data.ranges[:-1])
             self.data["linear_vel_x"] = odom_data.twist.twist.linear.x / 5.0
             # self.data["linear_vel_y"] = odom_data.twist.twist.linear.y
@@ -403,6 +404,29 @@ class F1TenthROSNode(Node):
         cur_min, cur_max = current_range
         des_min, des_max = desired_range
         return des_min + (value - cur_min) * (des_max - des_min) / (cur_max - cur_min)
+
+    def patch(self, data, t=30):
+        patched = np.zeros_like(data)
+
+        started_patch = None
+
+        for i, n in enumerate(data):
+            if started_patch is None:
+                if n < t:
+                    patched[i] = n
+                else:
+                    started_patch = i
+            else:
+                if n < t:
+                    patched[started_patch : i + 1] = (data[started_patch - 1] + n) / 2
+                    started_patch = None
+                else:
+                    pass
+
+        if started_patch is not None:
+            patched[started_patch:] = patched[started_patch - 1]
+
+        return patched
 
     def _calculate_ttc(
         self,
