@@ -1,5 +1,7 @@
 import os
 import signal
+from collections import deque
+from time import time
 
 import numpy as np
 import rclpy
@@ -28,19 +30,16 @@ class F1TenthROSNode(Node):
             AckermannDriveStamped, drive_topic, 10
         )
 
-        self.timer = self.create_timer(0.01, self.send_actions)
+        self.timer = self.create_timer(0.1, self.send_actions)
 
         # Subscribers
         self.lidar_subscription = self.create_subscription(
             LaserScan, lidar_scan_topic, self.lidar_callback, 10
         )
-        self.odom_subscription = self.create_subscription(
-            Odometry, odometry_topic, self.odom_callback, 10
-        )
 
         # Store latest sensor data
-        self.latest_lidar_data = None
-        self.latest_odom_data = None
+        self.lidar_data = deque(maxlen=9)
+        self.time_data = deque(maxlen=9)
 
         signal.signal(signal.SIGINT, self.shutdown_gracefully)
 
@@ -62,120 +61,41 @@ class F1TenthROSNode(Node):
         self.model = PPO.load(weight)
 
     def lidar_callback(self, msg: LaserScan):
-        self.latest_lidar_data = msg  # Store latest LIDAR data
+        self.lidar_data.append(np.array(msg.ranges[:-1]))  # Store latest LIDAR data
+        self.time_data.append(time())
         # self.get_logger().info(f"Received Lidar Data: {len(msg.ranges)} ranges")
-
-    def odom_callback(self, msg: Odometry):
-        self.latest_odom_data = msg  # Store latest Odometry data
-        position = msg.pose.pose.position
-        # self.get_logger().info(f"Twist Data: ({self.latest_odom_data.twist})")
-
-    def get_lidar_data(self):
-        """Returns the latest LIDAR data received."""
-        return self.latest_lidar_data
-
-    def get_odometry_data(self):
-        """Returns the latest odometry data received."""
-        return self.latest_odom_data
 
     # stable version -- works fine at moderate speed (no weighted averages)
     def send_drive_command(self, speed: float, steering_angle: float):
-        speed = 3.0 * speed
-        steering_angle = 0.5 * steering_angle
-
-        if speed < 1.0:
-            self.threshold_counter += 1
-        else:
-            self.threshold_counter = 0
-            self.boost = 100
-
-        if self.threshold_counter >= 10:
-            if self.boost - 10 >= 0:
-                speed = 2.0
-                self.boost -= 10
-
-        if self.threshold_counter >= 10 and self.boost == 0:
-            self.threshold_counter = 0
-            self.boost = 100
-
-        msg = AckermannDriveStamped()
-        msg.drive.speed = speed
-        msg.drive.steering_angle = steering_angle
-        self.drive_publisher.publish(msg)
-        self.get_logger().info(
-            f"Sent drive command: Speed={speed}, Steering Angle={steering_angle}"
+        scaled_speed = self._map_value(speed, (0.0, 1.0), (0.7, 3.0))
+        scaled_steering_angles = self._map_value(
+            steering_angle, (0.0, 1.0), (-0.4189, 0.4189)
         )
 
-    # drifty controller with weighted averages
-    def send_drive_command_2(self, speed: float, steering_angle: float):
-        speed = 3.0 * speed
-        steering_angle = 0.5 * steering_angle
-
-        if speed < 1.0:
-            self.threshold_counter += 1
-        else:
-            self.threshold_counter = 0
-            self.boost = 100
-
-        if self.threshold_counter >= 10:
-            if self.boost - 10 >= 0:
-                speed = 2.0
-                self.boost -= 10
-
-        if self.threshold_counter >= 10 and self.boost == 0:
-            self.threshold_counter = 0
-            self.boost = 100
-
-        # alpha = 0.8
-        self.speed = (1 - self.alpha) * self.speed + self.alpha * speed
-        self.steering = (1 - self.alpha) * self.steering + self.alpha * steering_angle
-
         msg = AckermannDriveStamped()
-        msg.drive.speed = self.speed
-        # msg.drive.steering_angle = steering_angle
-        msg.drive.steering_angle = self.steering
+        msg.drive.speed = scaled_speed
+        msg.drive.steering_angle = scaled_steering_angles
         self.drive_publisher.publish(msg)
         self.get_logger().info(
-            f"Sent drive command: Speed={speed}, Steering Angle={steering_angle}"
-        )
-
-    # insane controller - stable controller at very high speed
-    def send_drive_command_3(self, speed: float, steering_angle: float):
-        speed = 4.0 * speed
-        steering_angle = 0.7 * steering_angle
-
-        if speed < 1.0:
-            self.threshold_counter += 1
-        else:
-            self.threshold_counter = 0
-            self.boost = 100
-
-        if self.threshold_counter >= 10:
-            if self.boost - 10 >= 0:
-                speed = 2.0
-                self.boost -= 10
-
-        if self.threshold_counter >= 10 and self.boost == 0:
-            self.threshold_counter = 0
-            self.boost = 100
-
-        msg = AckermannDriveStamped()
-        msg.drive.speed = speed
-        msg.drive.steering_angle = steering_angle
-        self.drive_publisher.publish(msg)
-        self.get_logger().info(
-            f"Sent drive command: Speed={speed}, Steering Angle={steering_angle}"
+            f"Sent drive command: Speed={scaled_speed}, Steering Angle={scaled_steering_angles}"
         )
 
     def form_data(self):
-        lidar_data = self.get_lidar_data()
-        odom_data = self.get_odometry_data()
-        if lidar_data and odom_data:
-            self.data["scan"] = np.array(lidar_data.ranges)
-            # self.data["scan"] = np.array(lidar_data.ranges[:-1])
-            self.data["linear_vel_x"] = odom_data.twist.twist.linear.x
-            self.data["linear_vel_y"] = odom_data.twist.twist.linear.y
-            self.data["angular_vel_z"] = odom_data.twist.twist.angular.z
+        if not len(self.lidar_data):
+            return
+
+        current_lidar_data = self.lidar_data[-1] / 30.0
+        previous_lidar_data = self.lidar_data[0] / 30.0
+
+        self.data["scan"] = np.array(current_lidar_data)
+        self.data["previous_scan"] = np.array(previous_lidar_data)
+
+        self.get_logger().info(f"Time Data={self.time_data[-1] - self.time_data[0]}")
+
+    def _map_value(self, value, current_range, desired_range):
+        cur_min, cur_max = current_range
+        des_min, des_max = desired_range
+        return des_min + (value - cur_min) * (des_max - des_min) / (cur_max - cur_min)
 
     def send_actions(self):
         self.form_data()
@@ -186,11 +106,7 @@ class F1TenthROSNode(Node):
 
         if self.data["scan"] is None:
             return
-        if self.data["linear_vel_x"] is None:
-            return
-        if self.data["linear_vel_y"] is None:
-            return
-        if self.data["angular_vel_z"] is None:
+        if self.data["previous_scan"] is None:
             return
 
         # self.get_logger().info(f"{self.data}")
@@ -200,7 +116,10 @@ class F1TenthROSNode(Node):
         self.send_drive_command(float(action[1]), float(action[0]))
 
     def shutdown_gracefully(self, signum, frame):
-        self.send_drive_command(0.0, 0.0)
+        msg = AckermannDriveStamped()
+        msg.drive.speed = 0.0
+        msg.drive.steering_angle = 0.0
+        self.drive_publisher.publish(msg)
         self.get_logger().info("KeyboardInterrupt received! Stopping node execution...")
         raise KeyboardInterrupt
 
@@ -216,7 +135,7 @@ def main():
     drive_topic = "/ackermann_cmd"
 
     # Create an instance of the node
-    node = F1TenthROSNode(lidar_scan_topic, odometry_topic, drive_topic, "v0.2")
+    node = F1TenthROSNode(lidar_scan_topic, odometry_topic, drive_topic, "lo_1")
 
     try:
         rclpy.spin(node)  # Keep node running
@@ -229,4 +148,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
