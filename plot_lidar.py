@@ -1,7 +1,7 @@
+import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
 import rclpy
-from matplotlib.animation import FuncAnimation
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
@@ -18,74 +18,58 @@ class LidarOdomPlotter(Node):
         self.ranges = []
         self.angle_min = 0.0
         self.angle_increment = 0.0
-
-        # Odom Subscription
-        self.subscription_odom = self.create_subscription(
-            Odometry, "/odom", self.odom_callback, 10
-        )
-        self.odom_x_data = []
         self.time_stamps = []
         self.start_time = None
 
-        # Initialize Matplotlib Figure
-        self.fig, axs = plt.subplots(2, 1, gridspec_kw={"height_ratios": [3, 1]})
-
-        # LIDAR Plot (Polar)
-        self.ax_lidar = self.fig.add_subplot(2, 1, 1, projection="polar")
-        self.sc = self.ax_lidar.scatter([], [], s=10, c="red")
-        self.ax_lidar.set_title("Real-Time LIDAR Scan")
-        self.ax_lidar.set_ylim(0, 10)
-
-        # Odometry Plot (Time-Series)
-        self.ax_odom = axs[1]
-        (self.odom_line,) = self.ax_odom.plot([], [], "b-")
-        self.ax_odom.set_title("Odometry Velocity (linear.x)")
-        self.ax_odom.set_xlabel("Time (s)")
-        self.ax_odom.set_ylabel("Velocity (m/s)")
-        self.ax_odom.set_xlim(0, 10)  # Time window
-        self.ax_odom.set_ylim(0, 5)  # Adjust based on expected velocities
-
         # Start animation
-        self.ani = FuncAnimation(self.fig, self.update_plot, interval=100)
+        self.fig, self.ax = plt.subplots(subplot_kw={"projection": "polar"})
+
+        self.ani = animation.FuncAnimation(self.fig, self.plot_polar, interval=30)
 
     def lidar_callback(self, msg):
-        self.ranges = np.array(msg.ranges)
+        self.ranges = np.array(msg.ranges)[:-1]
         self.angle_min = msg.angle_min
         self.angle_increment = msg.angle_increment
 
-    def odom_callback(self, msg):
-        linear_x = msg.twist.twist.linear.x
-        current_time = self.get_clock().now().seconds_nanoseconds()[0]
+    def plot_polar(self, frame):
+        self.ax.clear()
+        data = self.patch(self.ranges)
 
-        if self.start_time is None:
-            self.start_time = current_time
+        if data.shape[0] != 1080:
+            raise ValueError("Input array must have exactly 1080 elements")
 
-        elapsed_time = current_time - self.start_time
-        self.odom_x_data.append(linear_x)
-        self.time_stamps.append(elapsed_time)
+        angles = np.linspace(-2.3499999046325684, 2.3499999046325684, 1080)
 
-        # Keep only the last 100 data points (for a sliding window effect)
-        if len(self.odom_x_data) > 100:
-            self.odom_x_data.pop(0)
-            self.time_stamps.pop(0)
+        self.ax.set_theta_zero_location("N")
+        self.ax.set_theta_direction(1)  # Counterclockwise
+        line = self.ax.plot(angles, data, c="b")
 
-    def update_plot(self, frame):
-        if len(self.ranges) > 0:
-            # Update LIDAR Plot
-            angles = self.angle_min + np.arange(len(self.ranges)) * self.angle_increment
-            valid_mask = np.isfinite(self.ranges)
-            angles, ranges = angles[valid_mask], self.ranges[valid_mask]
-            self.sc.set_offsets(np.c_[angles, ranges])
+        return line
 
-        # Update Odometry Plot
-        if len(self.time_stamps) > 1:
-            self.odom_line.set_data(self.time_stamps, self.odom_x_data)
-            self.ax_odom.set_xlim(
-                max(0, self.time_stamps[-1] - 10), self.time_stamps[-1]
-            )
+    def patch(self, data, t=30):
+        patched = np.zeros_like(data)
+
+        started_patch = None
+
+        for i, n in enumerate(data):
+            if started_patch is None:
+                if n < t:
+                    patched[i] = n
+                else:
+                    started_patch = i
+            else:
+                if n < t:
+                    patched[started_patch : i + 1] = (data[started_patch - 1] + n) / 2
+                    started_patch = None
+                else:
+                    pass
+
+        if started_patch is not None:
+            patched[started_patch:] = patched[started_patch - 1]
+
+        return patched
 
     def start_plot(self):
-        plt.tight_layout()
         plt.show()
 
 

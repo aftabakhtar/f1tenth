@@ -263,7 +263,7 @@ class F1TenthROSNode(Node):
         scaled_steering_angle = self._map_value(
             steering_angle, (0.0, +1.0), (-0.4189, 0.4189)
         )
-        scaled_speed = self._map_value(speed, (0.0, +1.0), (0.7, 3.75))
+        scaled_speed = self._map_value(speed, (0.0, +1.0), (0.7, 3.5))
 
         # self.csv_data.append(
         #     (time.time(), scaled_speed, scaled_steering_angle, list(scan), odom_speed)
@@ -344,7 +344,11 @@ class F1TenthROSNode(Node):
             # self.data["angular_vel_z"] = odom_data.twist.twist.angular.z
             self.odom_turning = odom_data.twist.twist.angular.z
 
-        if lidar_data and not np.array_equal(self.data["scan"], self.last_lidar_scan):
+        if (
+            lidar_data
+            and "scan" in self.data
+            and not np.array_equal(self.data["scan"], self.last_lidar_scan)
+        ):
             self.last_lidar_scan = self.data["scan"]
             self.times.append(time.time())
 
