@@ -263,7 +263,7 @@ class F1TenthROSNode(Node):
         scaled_steering_angle = self._map_value(
             steering_angle, (0.0, +1.0), (-0.4189, 0.4189)
         )
-        scaled_speed = self._map_value(speed, (0.0, +1.0), (0.7, 3.5))
+        scaled_speed = self._map_value(speed, (0.0, +1.0), (1.0, 5.5))
 
         # self.csv_data.append(
         #     (time.time(), scaled_speed, scaled_steering_angle, list(scan), odom_speed)
@@ -475,7 +475,7 @@ def main():
     drive_topic = "/ackermann_cmd"
 
     # Create an instance of the node
-    node = F1TenthROSNode(lidar_scan_topic, odometry_topic, drive_topic, "v0.11")
+    node = F1TenthROSNode(lidar_scan_topic, odometry_topic, drive_topic, "v0.18")
 
     try:
         rclpy.spin(node)  # Keep node running
