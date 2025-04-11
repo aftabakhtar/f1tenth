@@ -33,6 +33,8 @@ class LidarOdomPlotter(Node):
 
     def plot_polar(self, frame):
         self.ax.clear()
+
+        print(self.ranges.shape)
         data = self.patch(self.ranges)
 
         if data.shape[0] != 1080:
